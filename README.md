@@ -197,7 +197,7 @@ Take the cartoon dataset for example, run (batch size of 8\*4=32 is recommended)
 > torchrun finetune_stylegan.py --iter 600 --batch 4 --ckpt ./checkpoint/stylegan2-ffhq-config-f.pt --augment ./data/cartoon/lmdb/ --style cartoon
 -----------------------
 ## use above command to run
-> torchrun  --nproc_per_node=auto finetune_stylegan.py --iter 600 --batch 4 --ckpt ./checkpoint/stylegan2-ffhq-config-f.pt --augment ./data/cartoon/lmdb/ --style cartoon
+
 
 The fine-tuned model can be found in `./checkpoint/cartoon/finetune-000600.pt`. Intermediate results are saved in `./log/cartoon/`.
 
