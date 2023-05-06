@@ -254,7 +254,7 @@ By default, the code will load `refined_exstyle_code.npy` or `exstyle_code.npy` 
 
 <br/>
 
-## (4) Results
+## Below are The Paper Results (Not Ours)
 
 #### Exemplar-based cartoon style trasnfer
 
