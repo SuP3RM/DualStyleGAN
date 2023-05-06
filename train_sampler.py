@@ -49,7 +49,7 @@ if __name__ == "__main__":
     # style code
     WS = W[:,0:512*7].detach().cpu().numpy()
     
-    print('Load extrinsic tyle codes successfully!')
+    print('Load extrinsic style codes successfully!')
     # train color code sampler 
     icptc = ICPTrainer(WC, 128)
     icptc.icp.netT = icptc.icp.netT.to(device)

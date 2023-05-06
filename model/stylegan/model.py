@@ -369,6 +369,15 @@ class StyledConv(nn.Module):
 
 
 class ToRGB(nn.Module):
+    """
+    ToRGB class for StyleGAN generator.
+
+    Args:
+        in_channel (int): Number of input channels.
+        style_dim (int): Dimensionality of style vector.
+        upsample (bool): Whether to upsample the output.
+        blur_kernel (list): Kernel for upsampling.
+    """
     def __init__(self, in_channel, style_dim, upsample=True, blur_kernel=[1, 3, 3, 1]):
         super().__init__()
 
@@ -379,6 +388,18 @@ class ToRGB(nn.Module):
         self.bias = nn.Parameter(torch.zeros(1, 3, 1, 1))
 
     def forward(self, input, style, skip=None, externalweight=None):
+        """
+        Forward pass.
+
+        Args:
+            input (torch.Tensor): Input tensor.
+            style (torch.Tensor): Style vector.
+            skip (torch.Tensor): Skip connection.
+            externalweight (torch.Tensor): External weight.
+
+        Returns:
+            torch.Tensor: Output tensor.
+        """
         out = self.conv(input, style, externalweight)
         out = out + self.bias
 
@@ -474,6 +495,10 @@ class Generator(nn.Module):
 
             in_channel = out_channel
 
+        # didn't see any difference
+        # if attn:
+        #     self.attn = SelfAttention(in_channel * 2)
+
         self.n_latent = self.log_size * 2 - 2
 
     def make_noise(self):
@@ -566,6 +591,10 @@ class Generator(nn.Module):
 
         skip = self.to_rgb1(out, latent[:, 1])
 
+        # # self-attention
+        # if hasattr(self, "attn"):
+        #     out = self.attn(out)
+
         i = 1
         for conv1, conv2, noise1, noise2, to_rgb in zip(
             self.convs[::2], self.convs[1::2], noise[1::2], noise[2::2], self.to_rgbs
@@ -652,7 +681,15 @@ class ResBlock(nn.Module):
 
 
 class Discriminator(nn.Module):
-    def __init__(self, size, channel_multiplier=2, blur_kernel=[1, 3, 3, 1]):
+    """
+    Discriminator class for StyleGAN.
+
+    Args:
+        size (int): Image size.
+        channel_multiplier (int): Channel multiplier.
+        blur_kernel (list): Kernel for upsampling.
+    """
+    def __init__(self, size, channel_multiplier=2, blur_kernel=[1, 3, 3, 1], attn=False):
         super().__init__()
 
         channels = {
@@ -682,6 +719,10 @@ class Discriminator(nn.Module):
 
         self.convs = nn.Sequential(*convs)
 
+        # self-attention
+        # if attn:
+        #     self.attn = SelfAttention(in_channel)
+
         self.stddev_group = 4
         self.stddev_feat = 1
 
@@ -692,6 +733,15 @@ class Discriminator(nn.Module):
         )
 
     def forward(self, input):
+        """
+        Forward pass.
+
+        Args:
+            input (torch.Tensor): Input tensor.
+
+        Returns:
+            torch.Tensor: Output tensor.
+        """
         out = self.convs(input)
 
         batch, channel, height, width = out.shape
@@ -709,4 +759,49 @@ class Discriminator(nn.Module):
         out = out.view(batch, -1)
         out = self.final_linear(out)
 
+        # self-attention
+        # if hasattr(self, "attn"):
+        #     out = self.attn(out)
+
         return out
+    
+
+# didn't see any difference with this so commented out
+# inspired from: https://towardsdatascience.com/building-your-own-self-attention-gans-e8c9b9fe8e51
+class SelfAttention(nn.Module):
+    def __init__(self, in_channels):
+        super().__init__()
+        
+        # Query, Key and Value linear layers
+        self.query = nn.Conv2d(in_channels=in_channels, out_channels=in_channels // 2, kernel_size=1)
+        self.key = nn.Conv2d(in_channels=in_channels, out_channels=in_channels // 2, kernel_size=1)
+        self.value = nn.Conv2d(in_channels=in_channels, out_channels=in_channels, kernel_size=1)
+        
+        # Scaling factor for the dot product
+        self.scale = in_channels ** -0.5
+        
+    def forward(self, x):
+        batch_size, channels, height, width = x.size()
+        
+        # Compute Query, Key, and Value
+        query = self.query(x).view(batch_size, -1, height * width)
+        key = self.key(x).view(batch_size, -1, height * width)
+        value = self.value(x).view(batch_size, -1, height * width)
+        
+        # Compute dot product between Query and Key
+        dot_product = torch.bmm(query.transpose(1, 2), key)
+        
+        # Scale dot product
+        scaled_dot_product = dot_product * self.scale
+        
+        # Compute attention weights
+        attention_weights = torch.softmax(scaled_dot_product, dim=-1)
+        
+        # Apply attention to Value
+        attention_output = torch.bmm(value, attention_weights.transpose(1, 2))
+        
+        # Reshape and apply output linear layer
+        attention_output = attention_output.view(batch_size, channels, height, width)
+        attention_output = self.output(attention_output)
+        
+        return attention_output
