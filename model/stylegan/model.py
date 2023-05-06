@@ -420,6 +420,7 @@ class Generator(nn.Module):
         channel_multiplier=2,
         blur_kernel=[1, 3, 3, 1],
         lr_mlp=0.01,
+        attn=False,
     ):
         super().__init__()
 
@@ -495,9 +496,9 @@ class Generator(nn.Module):
 
             in_channel = out_channel
 
-        # didn't see any difference
-        # if attn:
-        #     self.attn = SelfAttention(in_channel * 2)
+        # attention layer
+        if attn:
+            self.attn = SelfAttention(self.channels[self.size])
 
         self.n_latent = self.log_size * 2 - 2
 
@@ -534,6 +535,7 @@ class Generator(nn.Module):
         noise=None,
         randomize_noise=True,
         z_plus_latent=False,
+        attn=False,
     ):
         if not input_is_latent:
             if not z_plus_latent:
@@ -591,9 +593,10 @@ class Generator(nn.Module):
 
         skip = self.to_rgb1(out, latent[:, 1])
 
-        # # self-attention
-        # if hasattr(self, "attn"):
-        #     out = self.attn(out)
+        # self-attention
+        if attn:
+            out = self.attn(out)
+
 
         i = 1
         for conv1, conv2, noise1, noise2, to_rgb in zip(

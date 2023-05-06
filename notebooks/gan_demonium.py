@@ -44,8 +44,8 @@ device = 'cuda'
 !pip install wget
 
 # os.chdir(f'./{CODE_DIR}')
-MODEL_DIR = os.path.join(os.path.dirname(os.getcwd()), CODE_DIR, 'checkpoint')
-DATA_DIR = os.path.join(os.path.dirname(os.getcwd()), CODE_DIR, 'data')
+MODEL_DIR = os.path.join(os.path.dirname(os.getcwd()), CODE_DIR, 'checkpoint/')
+DATA_DIR = os.path.join(os.path.dirname(os.getcwd()), CODE_DIR, 'data/')
 print(MODEL_DIR)
 print(DATA_DIR)
 !pwd
@@ -71,6 +71,7 @@ import argparse
 from argparse import Namespace
 from torchvision import transforms
 from torch.nn import functional as F
+import torch.utils.checkpoint
 import torchvision
 import matplotlib.pyplot as plt
 from model.dualstylegan import DualStyleGAN
@@ -81,10 +82,38 @@ torch.version.cuda
 
 torch.__version__
 
+torch.cuda.empty_cache() # clear cache
+torch.nn.parallel.DistributedDataParallel
+
+# max_split_size_mb = '2GiB'
+
+# memory footprint support libraries/code
+!ln -sf /opt/bin/nvidia-smi /usr/bin/nvidia-smi
+!pip install gputil
+!pip install psutil
+!pip install humanize
+
+import psutil
+import humanize
+import os
+import GPUtil as GPU
+
+GPUs = GPU.getGPUs()
+# XXX: only one GPU on Colab and isn’t guaranteed
+gpu = GPUs[0]
+def printm():
+    process = psutil.Process(os.getpid())
+    print("Gen RAM Free: " + humanize.naturalsize(psutil.virtual_memory().available), " |     Proc size: " + humanize.naturalsize(process.memory_info().rss))
+    print("GPU RAM Free: {0:.0f}MB | Used: {1:.0f}MB | Util {2:3.0f}% | Total     {3:.0f}MB".format(gpu.memoryFree, gpu.memoryUsed, gpu.memoryUtil*100, gpu.memoryTotal))
+printm()
+
 """## Step 1: Select Available Style Types"""
 
-style_types = ['cartoon', 'caricature', 'avatar, anime', 'arcane', 'comic', 'face_cartoon', 'pixar', 'slamdunk']
-style_type = style_types[5]
+# style_types = ['cartoon', 'caricature', 'anime', 'arcane', 'comic', 'pixar', 'slamdunk']
+# style_type = style_types[0]
+
+our_style_types = ['cartoon', 'avatar', 'face_cartoon', 'cartoon_images_augment', 'fantasy', 'impasto']
+style_type = our_style_types[0]
 
 """## Step 2: Set Pretrained Models Mapping
 
@@ -112,8 +141,13 @@ MODEL_PATHS = {
     "pixar-S": {"id": "1I9mRTX2QnadSDDJIYM_ntyLrXjZoN7L-", "name": "exstyle_code.npy"},    
     "slamdunk-G": {"id": "1MGGxSCtyf9399squ3l8bl0hXkf5YWYNz", "name": "generator.pt"},
     "slamdunk-N": {"id": "1-_L7YVb48sLr_kPpOcn4dUq7Cv08WQuG", "name": "sampler.pt"},
-    "slamdunk-S": {"id": "1Dgh11ZeXS2XIV2eJZAExWMjogxi_m_C8", "name": "exstyle_code.npy"},     
+    "slamdunk-S": {"id": "1Dgh11ZeXS2XIV2eJZAExWMjogxi_m_C8", "name": "exstyle_code.npy"},
+    # "avatar-S": {"id": "", "name": "refined_exstyle_code.npy"}
 }
+
+# MODEL_PATHS = {
+#     "encoder": {"id": "1NgI4mPkboYvYw3MWcdUaQhkr0OWgs9ej", "name": "encoder.pt"},
+# }
 
 """## Step 3: Load Pretrained Model
 We assume that you have downloaded all relevant models and placed them in the directory defined by the above dictionary.
@@ -129,9 +163,9 @@ transform = transforms.Compose(
 )
 
 # load DualStyleGAN
-generator = DualStyleGAN(1024, 512, 8, 2, res_index=6)
+generator = DualStyleGAN(1024, 512, 8, 2, res_index=6) # add another ModResBlock ? 
 generator.eval()
-ckpt = torch.load(os.path.join(MODEL_DIR, style_type, 'generator.pt'), map_location=lambda storage, loc: storage)
+ckpt = torch.load(os.path.join(MODEL_DIR, style_type, 'generator.pt'))
 generator.load_state_dict(ckpt["g_ema"])
 generator = generator.to(device)
 
@@ -146,7 +180,12 @@ encoder = pSp(opts)
 encoder.eval()
 encoder = encoder.to(device)
 
-# load extrinsic style code
+# uncomment to load extrinsic style code
+# ePath = os.path.join(MODEL_DIR, style_type, 'exstyle_code.npy')
+# print(ePath)
+# exstyles = np.load(ePath, allow_pickle=True)
+
+# cartoon
 exstyles = np.load(os.path.join(MODEL_DIR, style_type, MODEL_PATHS[style_type+'-S']["name"]), allow_pickle='TRUE').item()
 
 # load sampler network
@@ -213,16 +252,19 @@ plt.show()
 
 ### Select style image
 
-Select the style id (the mapping between id and style image filename are defined [here](https://github.com/williamyang1991/DualStyleGAN/data_preparation/id_filename_list.txt))
+Select the style id.
 We assume that you have downloaded the dataset and placed them in `./data/STYLE_TYPE/images/train/`.
 If not, the style images will not be shown below.
 
 Original Code
 """
 
-style_id = 26
-# try to load the style image
+# stylename = 'cs11577691271385561071.jpg' # avatar dataset some examples: ['cs11577684247192164878', 'cs11577676438302104026']
+
+# uncomment to try to load the style image for Cartoon dataset
+style_id = 2
 stylename = list(exstyles.keys())[style_id]
+
 stylepath = os.path.join(DATA_DIR, style_type, 'images/train', stylename)
 print('loading %s'%stylepath)
 if os.path.exists(stylepath):
@@ -253,7 +295,7 @@ with torch.no_grad():
     img_rec, instyle = encoder(I, randomize_noise=False, return_latents=True, 
                             z_plus_latent=True, return_z_plus_latent=True, resize=False)    
     img_rec = torch.clamp(img_rec.detach(), -1, 1)
-    
+
     latent = torch.tensor(exstyles[stylename]).repeat(2,1,1).to(device)
     # latent[0] for both color and structrue transfer and latent[1] for only structrue transfer
     latent[1,7:18] = instyle[0,7:18]
@@ -388,3 +430,126 @@ vis = torchvision.utils.make_grid(img_gen, batch, 1)
 plt.figure(figsize=(10,10),dpi=120)
 visualize(vis.cpu())
 plt.show()
+
+"""## Step 8 (GAN-demonium): Dimensionality Reduction on Extrinsic Styles"""
+
+# Commented out IPython magic to ensure Python compatibility.
+# %load_ext autoreload
+
+# !pip install umap-learn scikit-learn 
+# !pip install datashader colorcet pandas
+from model.dsgandemonium import DualStyleGANdemonium as DSGANDemonium
+
+## Step 8 (GAN-demonium): Dimensionality Reduction on Extrinsic Styles
+
+
+cpu = lambda x: x.cpu().detach().numpy()
+dsdemon = DSGANDemonium(1024, 512, 8, 2, res_index=6)
+dsdemon.eval()
+# ckpt = torch.load(MODEL_DIR, style_type , 'generator.pt', map_location=lambda storage, loc: storage)
+ckpt = torch.load(os.path.join(MODEL_DIR, style_type, 'generator.pt'))
+dsdemon.load_state_dict(ckpt["g_ema"])
+dsdemon = dsdemon.to(device)
+with torch.no_grad():
+    _, instyle = encoder(I, randomize_noise=True, return_latents=True, 
+                            z_plus_latent=True, return_z_plus_latent=True, resize=False)    
+    
+    latent = torch.tensor(exstyles[stylename]).to(device)
+    exstyle = dsdemon.generator.style(latent)
+    
+    int_imgs = []
+    vis_indicies = [1, 3, 5]
+    for vis_index in vis_indicies:
+        int_img_i, _ = dsdemon([instyle], exstyle, z_plus_latent=True, 
+                               vis_index=vis_index, truncation=0.7, 
+                               truncation_latent=0, use_res=True, 
+                               interp_weights=[0.6]*7+[1]*11
+                               )
+        int_imgs.append(torch.clamp(int_img_i.detach(), -1, 1))
+def visualize(img_arr, ax=None):
+    if not ax:
+        ax = plt.gca()
+    ax.imshow(((img_arr.detach().numpy().transpose(1, 2, 0) + 1.0) * 127.5).astype(np.uint8), aspect="auto")
+    ax.axis('off')
+plt.clf(); fig = plt.gcf()
+fig.set_size_inches(8, 8)
+ax = fig.add_subplot(2, 2, 1)
+ax.imshow(np.rot90(cpu(I)[0].swapaxes(0, 2), -1), aspect="auto")
+ax.axis('off')
+ax.set_title("Input Image")
+
+for i, int_img_i in enumerate(int_imgs):
+    # Take first 100 channels, treat as batch dimension for visualization.
+    img_i_chans = int_img_i.swapaxes(0, 1)[:100]
+    vis = torchvision.utils.make_grid(img_i_chans, nrows=10, padding=1)
+    ax = fig.add_subplot(2, 2, i+2)
+    visualize(vis.cpu(), ax)
+    ax.set_title(f"Image Channels: {(i+1)*2} Layers")
+fig.savefig("channel-vis", dpi=200)
+import datashader as ds
+import colorcet as cc
+import datashader.transfer_functions as tf
+import pandas as pd
+import matplotlib.pyplot as plt
+
+def render_embedding(data, **kwargs):
+    size = min(data.shape[0] // 10, 100)
+    canvas = ds.Canvas(100, 100, **kwargs)
+    data = np.c_[data, np.arange(data.shape[0])]
+    df = pd.DataFrame(data, columns=["x", "y", "i"])
+
+    img = tf.shade(canvas.points(df, 'x', 'y'), how="eq_hist", cmap=plt.cm.viridis)
+    img = tf.set_background(img, 'white')
+    return img
+# Aggregate extrinsic styles into a big matrix.
+extrinsic = np.concatenate([style for style in exstyles.values()])
+# Encode extrinsic styles into the intermediate latent space.
+def encode_intermediate_style(styles):
+    custyles = torch.from_numpy(styles).to(device)
+    codes = np.dstack([cpu(generator.generator.style(style)) for style in custyles])
+    codes = np.moveaxis(codes, (0, 1, 2), (1, 2, 0))
+    return codes
+# Partition the styles according to color and structure.
+extrinsic_s = extrinsic.copy()
+extrinsic_s[:,7:] = 0.0
+extrinsic_c = extrinsic.copy()
+extrinsic_c[:,:7] = 0.0
+codes = encode_intermediate_style(extrinsic)
+codes_s = encode_intermediate_style(extrinsic_s)
+codes_c = encode_intermediate_style(extrinsic_c)
+import umap
+from sklearn import manifold
+
+data = extrinsic.copy()
+data = data.reshape(data.shape[0], -1)
+
+# mapper = manifold.TSNE(n_components=2, perplexity=7.0)
+mapper = umap.UMAP(n_neighbors=20, n_components=2)
+embedding = mapper.fit_transform(data)
+
+plt.clf()
+fig = plt.gcf()
+ax = fig.add_subplot()
+ax.scatter(embedding[:,0], embedding[:,1], alpha=0.4)
+ax.axis('off')
+ax.set_title("UMAP Embedding of Encoded Extrinsic Style Images")
+plt.show()
+fig.savefig("UMAP-extstyle-images", dpi=200)
+data = codes.reshape(codes.shape[0], -1)
+# data = extrinsic.reshape(extrinsic.shape[0], -1)
+n = data.shape[0]
+_, s, _ = np.linalg.svd(data.reshape(n, -1))
+s /= s.max()
+exp_var = np.cumsum(s**2) / np.sum(s**2)
+plt.clf(); fig = plt.gcf()
+ax = fig.add_subplot()
+ax.bar(np.arange(s.size), s, label="Singular Values")
+ax.set_xlabel("Index")
+ax.set_ylabel("Singular Value", color="C0")
+ax.set_title("Encoded Latent Style Decomposition")
+ax.tick_params(axis='y', labelcolor="C0")
+ax2 = ax.twinx()
+ax2.plot(np.arange(s.size), exp_var, "C1", label="Explained Variance")
+ax2.tick_params(axis="y", labelcolor="C1")
+ax2.set_ylabel("Explained Variance", color="C1")
+fig.savefig("SVD-variance", dpi=200)
