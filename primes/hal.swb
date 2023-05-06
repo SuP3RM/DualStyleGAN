@@ -1,0 +1,13 @@
+#!/bin/bash
+#SBATCH --job-name="umap"
+#SBATCH --output="umap.%j.%N.out"
+#SBATCH --error="umap.%j.%N.err"
+#SBATCH --partition=cpun4
+#SBATCH --time=24
+
+module load conda_base
+conda activate raw-primes
+
+cd /home/zjw4/primes
+
+srun umap_demo.py
